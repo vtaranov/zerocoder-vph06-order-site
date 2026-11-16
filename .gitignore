@@ -9,3 +9,5 @@ web/
 *.sql
 backend/app/static/
 nginx/validation.conf
+!backend/migrations/*.sql
+!backend/scripts/*.sql
