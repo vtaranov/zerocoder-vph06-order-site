@@ -1,0 +1,12 @@
+{
+  "name": "vph06-atelier",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "swagger-ui-dist": "5.35.0"
+  }
+}

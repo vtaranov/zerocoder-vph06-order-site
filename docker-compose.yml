@@ -1,0 +1,145 @@
+name: ${COMPOSE_PROJECT_NAME:-vph04}
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "5m"
+    max-file: "2"
+services:
+  nginx:
+    image: nginx:1.28-alpine
+    restart: unless-stopped
+    environment:
+      HTTPS_PORT: ${HTTPS_PORT:-18443}
+    ports:
+      - "${HTTPS_PORT:-18443}:443"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/templates/default.conf.template:ro
+      - ./web:/usr/share/nginx/html:ro
+      - ${TLS_LIVE_DIR}:/etc/letsencrypt/live/site:ro
+      - ${TLS_ARCHIVE_DIR}:/etc/letsencrypt/archive/${PUBLIC_HOST}:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    networks: [edge, database]
+    mem_limit: 64m
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, "wget -q -O /dev/null http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?required}
+      POSTGRES_USER: ${POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+    command: [postgres, -c, shared_buffers=32MB, -c, max_connections=30]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [database]
+    mem_limit: 256m
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  pgadmin:
+    profiles: [maintenance]
+    image: dpage/pgadmin4:9.19
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:?required}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:?required}
+      PGADMIN_CONFIG_SERVER_MODE: "True"
+      PGADMIN_CONFIG_UPGRADE_CHECK_ENABLED: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "True"
+      PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION: "True"
+      PGADMIN_CONFIG_SESSION_COOKIE_SECURE: "True"
+      PGADMIN_CONFIG_WTF_CSRF_SSL_STRICT: "True"
+      PGADMIN_CONFIG_PROXY_X_HOST_COUNT: "1"
+      PGADMIN_CONFIG_PROXY_X_PROTO_COUNT: "1"
+      PGADMIN_CONFIG_PROXY_X_PORT_COUNT: "1"
+      SCRIPT_NAME: /pgadmin
+      GUNICORN_THREADS: "5"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+    networks: [database]
+    healthcheck:
+      test: [CMD, python3, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1/pgadmin/misc/ping", timeout=3)']
+      start_period: 90s
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    mem_limit: 384m
+    logging: *logging
+  registry:
+    profiles: [maintenance]
+    image: registry:3
+    restart: unless-stopped
+    environment:
+      REGISTRY_HTTP_ADDR: 0.0.0.0:5000
+      REGISTRY_HTTP_SECRET: ${REGISTRY_HTTP_SECRET:?required}
+      REGISTRY_AUTH: htpasswd
+      REGISTRY_AUTH_HTPASSWD_REALM: VPh04 Registry
+      REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd
+      REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
+      OTEL_TRACES_EXPORTER: none
+    volumes:
+      - registry_data:/var/lib/registry
+      - ./secrets/registry:/auth:ro
+    networks: [edge]
+    mem_limit: 128m
+    logging: *logging
+  watchtower:
+    image: containrrr/watchtower:1.7.1
+    restart: unless-stopped
+    environment:
+      DOCKER_API_VERSION: ${DOCKER_API_VERSION:-1.44}
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_SCOPE: vph04
+      WATCHTOWER_POLL_INTERVAL: "60"
+      WATCHTOWER_CLEANUP: "false"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./secrets/docker-config.json:/config.json:ro
+    networks: [edge]
+    mem_limit: 96m
+    logging: *logging
+  backend:
+    image: ${BACKEND_IMAGE:-vph06-backend:2.0}
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?required}
+      POSTGRES_USER: ${POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      SECRET_KEY: ${SECRET_KEY:?required}
+      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:?required}
+      ENABLE_DOCS: ${ENABLE_DOCS:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [database]
+    mem_limit: 192m
+    logging: *logging
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/api/health", timeout=3)']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+networks:
+  edge:
+  database:
+    internal: true
+volumes:
+  postgres_data:
+  pgadmin_data:
+  registry_data:

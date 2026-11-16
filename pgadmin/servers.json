@@ -1,0 +1,1 @@
+{"Servers":{"1":{"Name":"VPh04 - Orders PostgreSQL","Group":"VPh04","Host":"postgres","Port":5432,"MaintenanceDB":"orders","Username":"orders_app","SSLMode":"prefer","ConnectionParameters":{"connect_timeout":10}}}}
